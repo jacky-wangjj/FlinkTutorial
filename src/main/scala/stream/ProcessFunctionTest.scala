@@ -1,7 +1,11 @@
 package stream
 
+import org.apache.flink.api.common.functions.RichFlatMapFunction
 import org.apache.flink.api.common.state.{ValueState, ValueStateDescriptor}
 import org.apache.flink.api.java.utils.ParameterTool
+import org.apache.flink.configuration.Configuration
+import org.apache.flink.runtime.state.filesystem.FsStateBackend
+import org.apache.flink.runtime.state.memory.MemoryStateBackend
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.util.Collector
@@ -22,6 +26,8 @@ object ProcessFunctionTest {
     //创建流处理执行环境
     val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
+    //设置StateBackend
+    //    env.setStateBackend(new MemoryStateBackend())
     //从文件输入
     val inputStream: DataStream[String] = env.socketTextStream(host, port)
     //transform
@@ -35,6 +41,25 @@ object ProcessFunctionTest {
 
     dataStream.print("input data")
     processedStream.print("processed data")
+
+    val processedStream2: DataStream[(String, Double, Double)] = dataStream.keyBy(_.id)
+      //      .process(new TempChangeAlert(10.0)) //第一种方法，使用process
+      //      .flatMap(new TempChangeAlert2(10.0)) //第二种方法，使用flatMap富函数进行状态运算
+      .flatMapWithState[(String, Double, Double), Double] {
+      //如果没有状态的话，首条数据，直接将当前数据存储状态
+      case (input: SensorReading, None) => (List.empty, Some(input.temperature))
+      //如果有状态，就应该与上次的温度值比较差值，如果大于阈值输出报警
+      case (input: SensorReading, lastTemp: Some[Double]) => {
+        val diff: Double = (input.temperature - lastTemp.get).abs
+        if (diff > 10.0) {
+          (List((input.id, lastTemp.get, input.temperature)), Some(input.temperature))
+        } else {
+          (List.empty, Some(input.temperature))
+        }
+      }
+    } //第三种方法，使用flatMapWithState
+
+    processedStream2.print("processed2 data")
 
     //启动任务
     env.execute("process function test")
@@ -75,5 +100,41 @@ class TempIncreAlert() extends KeyedProcessFunction[String, SensorReading, Strin
     //输出报警信息
     out.collect(ctx.getCurrentKey + "温度连续上升")
     currentTimer.clear()
+  }
+}
+
+class TempChangeAlert(threshold: Double) extends KeyedProcessFunction[String, SensorReading, (String, Double, Double)] {
+  //定义一个状态变量，保存上次的温度值
+  lazy val lastTempState: ValueState[Double] = getRuntimeContext.getState(new ValueStateDescriptor[Double]("lastTemp", classOf[Double]))
+
+  override def processElement(i: SensorReading, context: KeyedProcessFunction[String, SensorReading, (String, Double, Double)]#Context, collector: Collector[(String, Double, Double)]): Unit = {
+    //获取上次的温度值
+    val lastTemp: Double = lastTempState.value()
+    //用当前温度值和上次温度值求差，如果大于阈值，输出报警信息
+    val diff: Double = (i.temperature - lastTemp).abs
+    if (diff > threshold) {
+      collector.collect(i.id, lastTemp, i.temperature)
+    }
+    lastTempState.update(i.temperature)
+  }
+}
+
+class TempChangeAlert2(threshold: Double) extends RichFlatMapFunction[SensorReading, (String, Double, Double)] {
+  private var lastTempState: ValueState[Double] = _
+
+  //初始化的时候声明state变量
+  override def open(parameters: Configuration): Unit = {
+    lastTempState = getRuntimeContext.getState(new ValueStateDescriptor[Double]("lastTemp", classOf[Double]))
+  }
+
+  override def flatMap(in: SensorReading, collector: Collector[(String, Double, Double)]): Unit = {
+    //获取上次的温度值
+    val lastTemp: Double = lastTempState.value()
+    //用当前温度值和上次温度值求差，如果大于阈值，输出报警信息
+    val diff: Double = (in.temperature - lastTemp).abs
+    if (diff > threshold) {
+      collector.collect(in.id, lastTemp, in.temperature)
+    }
+    lastTempState.update(in.temperature)
   }
 }
