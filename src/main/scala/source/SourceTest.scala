@@ -48,4 +48,4 @@ object SourceTest {
   }
 }
 
-case class SensorReading(id: String, timstemp: Long, temperature: Double)
+case class SensorReading(id: String, timstamp: Long, temperature: Double)

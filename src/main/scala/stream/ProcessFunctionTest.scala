@@ -1,13 +1,18 @@
 package stream
 
 import org.apache.flink.api.common.functions.RichFlatMapFunction
+import org.apache.flink.api.common.restartstrategy.RestartStrategies
 import org.apache.flink.api.common.state.{ValueState, ValueStateDescriptor}
+import org.apache.flink.api.common.time.Time
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.runtime.state.filesystem.FsStateBackend
 import org.apache.flink.runtime.state.memory.MemoryStateBackend
+import org.apache.flink.streaming.api.{CheckpointingMode, TimeCharacteristic}
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
+import org.apache.flink.streaming.api.functions.timestamps.BoundedOutOfOrdernessTimestampExtractor
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.util.Collector
 import source.SensorReading
 
@@ -26,15 +31,29 @@ object ProcessFunctionTest {
     //创建流处理执行环境
     val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
+    //设置使用EventTime
+    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+    //checkpoint设置
+    env.enableCheckpointing(60000) //每分钟保存检查点
+    env.getCheckpointConfig.setCheckpointingMode(CheckpointingMode.AT_LEAST_ONCE)
+    env.getCheckpointConfig.setCheckpointTimeout(100000)
+    env.getCheckpointConfig.setMaxConcurrentCheckpoints(1) //并行checkpoint限制
+    env.getCheckpointConfig.setMinPauseBetweenCheckpoints(100) //checkpoint最小时间间隔
+    //重启策略
+    env.setRestartStrategy(RestartStrategies.fixedDelayRestart(3, 500)) //500秒内重启3次
+    env.setRestartStrategy(RestartStrategies.failureRateRestart(3, Time.seconds(300), Time.seconds(10))) //300秒内重启3次，每次重启最少间隔10秒
     //设置StateBackend
     //    env.setStateBackend(new MemoryStateBackend())
+    //    env.setStateBackend(new FsStateBackend("file:///tmp/checkpoints"))
     //从文件输入
     val inputStream: DataStream[String] = env.socketTextStream(host, port)
     //transform
     val dataStream: DataStream[SensorReading] = inputStream.map(data => {
       val dataArr: Array[String] = data.split(",")
       SensorReading(dataArr(0).trim, dataArr(1).trim.toLong, dataArr(2).trim.toDouble)
-    })
+    }).assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[SensorReading](Time.seconds(1)) {
+      override def extractTimestamp(t: SensorReading): Long = t.timstamp * 1000
+    }) //处理乱序事件，延迟1s
 
     val processedStream: DataStream[String] = dataStream.keyBy(_.id)
       .process(new TempIncreAlert())

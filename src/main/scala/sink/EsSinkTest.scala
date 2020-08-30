@@ -46,7 +46,7 @@ object EsSinkTest {
           val json: util.HashMap[String, String] = new util.HashMap[String, String]()
           json.put("sensor_id", t.id)
           json.put("temperature", t.temperature.toString)
-          json.put("ts", t.timstemp.toString)
+          json.put("ts", t.timstamp.toString)
 
           //创建index request,准备发送数据
           val indexRequest: IndexRequest = Requests.indexRequest()

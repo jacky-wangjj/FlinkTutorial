@@ -24,7 +24,7 @@ object TransformTest {
     val aggStream: DataStream[SensorReading] = dataStream.keyBy("id") //.keyBy(0)
       //      .sum("temperature") //.sum(2)
       //输出当前传感器最新的温度+10，时间戳是上一次时间戳+1
-      .reduce((x, y) => SensorReading(x.id, x.timstemp + 1, y.temperature + 10))
+      .reduce((x, y) => SensorReading(x.id, x.timstamp + 1, y.temperature + 10))
 
     //打印输出
     aggStream.print("agg result")

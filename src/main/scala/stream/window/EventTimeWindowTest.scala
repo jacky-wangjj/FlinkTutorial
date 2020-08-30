@@ -35,10 +35,10 @@ object EventTimeWindowTest {
       val dataArr: Array[String] = data.split(",")
       SensorReading(dataArr(0).trim, dataArr(1).trim.toLong, dataArr(2).trim.toDouble)
     })
-      //      .assignAscendingTimestamps(_.timstemp * 1000) //有序事件
+      //      .assignAscendingTimestamps(_.timstamp * 1000) //有序事件
       //      .assignTimestampsAndWatermarks(new PeriodicAssigner())
       .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[SensorReading](Time.seconds(1)) {
-      override def extractTimestamp(t: SensorReading): Long = t.timstemp * 1000
+      override def extractTimestamp(t: SensorReading): Long = t.timstamp * 1000
     }) //处理乱序事件，延迟1s
 
     //统计10s内的最低温度
@@ -65,13 +65,13 @@ class PeriodicAssigner() extends AssignerWithPeriodicWatermarks[SensorReading] {
   override def getCurrentWatermark: Watermark = new Watermark(maxTs - bound)
 
   override def extractTimestamp(t: SensorReading, l: Long): Long = {
-    maxTs = maxTs.max(t.timstemp * 1000)
-    t.timstemp * 1000
+    maxTs = maxTs.max(t.timstamp * 1000)
+    t.timstamp * 1000
   }
 }
 
 class PunctuateAssinger extends AssignerWithPunctuatedWatermarks[SensorReading] {
   override def checkAndGetNextWatermark(t: SensorReading, l: Long): Watermark = new Watermark(l)
 
-  override def extractTimestamp(t: SensorReading, l: Long): Long = t.timstemp * 1000
+  override def extractTimestamp(t: SensorReading, l: Long): Long = t.timstamp * 1000
 }
